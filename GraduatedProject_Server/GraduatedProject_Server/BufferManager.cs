@@ -55,7 +55,6 @@ namespace GraduatedProject_Server
             if (args == null)
                 return;
             m_free_index_pool!.Push(args.Offset);
-            //args.SetBuffer(null, 0, 0);
         }
     }
 }

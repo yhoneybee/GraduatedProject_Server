@@ -22,6 +22,10 @@ namespace GraduatedProject_Server
         Queue<Packet> sendPacketQueue = new Queue<Packet>(100);
         object mutexSendPacketQueue = new object();
 
+        public User? user;
+
+        Timer? timer;
+
         public UserToken()
         {
             messageResolver = new MessageResolver();
@@ -41,9 +45,11 @@ namespace GraduatedProject_Server
 
             BufferManager.Instance.SetBuffer(receiveEventArgs);
             BufferManager.Instance.SetBuffer(sendEventArgs);
+
+            timer = new Timer(Update, null, 0, 5);
         }
 
-        public void Update()
+        public void Update(object? state)
         {
             if (packetList.Count > 0)
             {
@@ -51,10 +57,9 @@ namespace GraduatedProject_Server
                 {
                     try
                     {
-                        //수신 패킷 처리
                         foreach (Packet packet in packetList)
-                            //user.ProcessPacket(packet);
-                            packetList.Clear();
+                            user!.ProcessPacket(packet);
+                        packetList.Clear();
                     }
                     catch (Exception e)
                     {
@@ -71,6 +76,7 @@ namespace GraduatedProject_Server
                 packetList.Add(packet);
             }
         }
+
         public void StartReceive()
         {
             bool pending = socket!.ReceiveAsync(receiveEventArgs!);
@@ -187,27 +193,12 @@ namespace GraduatedProject_Server
             }
             else
             {
-                if (e.SocketError == SocketError.Success)
-                {
-                    Packet packet = new Packet();
-                    packet.type = (short)PacketType.END;
 
-                    AddPacket(packet);
-                }
-                else
-                {
-                    Packet packet = new Packet();
-                    packet.type = (short)PacketType.END;
-
-                    AddPacket(packet);
-                }
             }
         }
 
         void OnMessageCompleted(Packet packet)
         {
-            ChatPacket chatPacket = Data<ChatPacket>.Deserialize(packet.data!);
-            Console.WriteLine($"[{(ChatType)chatPacket.chatType}] {chatPacket.id} : {chatPacket.chat}");
             AddPacket(packet);
         }
 
@@ -228,7 +219,7 @@ namespace GraduatedProject_Server
             }
 
             socket = null;
-            //User = null;
+            user = null;
             messageResolver!.ClearBuffer();
 
             lock (mutexPacketList)
@@ -267,6 +258,8 @@ namespace GraduatedProject_Server
             SocketAsyncEventArgsPool.Instance.Push(sendEventArgs);
 
             sendEventArgs = null;
+
+            timer!.Dispose();
         }
     }
 }

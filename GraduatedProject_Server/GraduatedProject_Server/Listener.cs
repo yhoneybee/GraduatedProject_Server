@@ -83,27 +83,22 @@ namespace GraduatedProject_Server
             {
                 Socket client = e.AcceptSocket!;
 
-                Console.WriteLine("NEW CLIENT");
-
-                UserToken token = new UserToken();
+                UserToken token = new();
                 token.Init();
 
-                token.socket = client;
-                token.socket.NoDelay = true;
+                User user = new();
+                user.Init(token);
 
-                token.StartReceive();
+                token.user = user;
+                user.token!.socket = client;
 
-                ChatPacket chatPacket = new ChatPacket();
-                chatPacket.id = "yhoney";
-                chatPacket.chat = "349839439";
-                chatPacket.chatType = ((short)ChatType.ALL);
-                var buffer = Data<ChatPacket>.Serialize(chatPacket);
+                user.token.socket.NoDelay = true;
+                user.token.socket.ReceiveTimeout = 60 * 1000;
+                user.token.socket.SendTimeout = 60 * 1000;
 
-                Packet packet = new Packet();
-                packet.type = (short)PacketType.CHAT_PACKET;
-                packet.SetData(buffer, buffer.Length);
+                user.token.StartReceive();
 
-                token.Send(packet);
+                UserManager.Instance.Users!.Add(user);
             }
             else
             {

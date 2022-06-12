@@ -9,7 +9,7 @@ namespace GraduatedProject_Server
         public static void Main(string[] args)
         {
             Listener listener = new Listener();
-            listener.Start(6475, 50);
+            listener.Start(6475, 100);
         }
     }
 }
