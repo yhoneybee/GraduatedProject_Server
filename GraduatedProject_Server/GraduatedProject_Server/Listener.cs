@@ -98,7 +98,7 @@ namespace GraduatedProject_Server
 
                 user.token.StartReceive();
 
-                GameManager.Instance.Users!.Add(user);
+                K.Users.Add(user);
             }
             else
             {

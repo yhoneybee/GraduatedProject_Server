@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System;
 using MySql.Data.MySqlClient;
+using MyPacket;
 
 namespace GraduatedProject_Server
 {
@@ -82,6 +83,11 @@ namespace GraduatedProject_Server
             connection!.Close();
             connection.Dispose();
             GC.SuppressFinalize(this);
+        }
+
+        public MySQL()
+        {
+            Initilize();
         }
 
         public void Initilize()

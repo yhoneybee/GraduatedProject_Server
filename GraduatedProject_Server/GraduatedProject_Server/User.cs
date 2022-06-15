@@ -29,8 +29,10 @@ namespace GraduatedProject_Server
                     REQ_Login(packet);
                     break;
                 case PacketType.REQ_CREATE_ROOM_PACKET:
+                    REQ_CreateRoom(packet);
                     break;
                 case PacketType.REQ_ENTER_ROOM_PACKET:
+                    REQ_EnterRoom(packet);
                     break;
                 case PacketType.REQ_LEAVE_ROOM_PACKET:
                     break;
@@ -61,6 +63,99 @@ namespace GraduatedProject_Server
             }
         }
 
+        private void REQ_EnterRoom(Packet packet)
+        {
+            Console.Write("REQ_EnterRoom : ");
+
+            var req = packet.GetPacket<REQ_CreateEnterRoom>();
+
+            RES_EnterRoom res = new RES_EnterRoom();
+            res.roomInfo.name = req.roomName;
+
+            var where = K.Rooms!.Where(x => x.name == req.roomName);
+
+            res.completed = false;
+            res.reason = "존재하지 않는 방";
+
+            if (where.Any())
+            {
+                MySqlDataReader reader;
+                if (K.SQL.Select(new Query().Select("*", "roominfo", $"name = '{req.roomName}'"), out reader!))
+                {
+                    reader!.Read();
+                    if (reader["player1"] != null)
+                        res.roomInfo.player1 = reader["player1"].ToString();
+                    if (reader["player2"] != null)
+                        res.roomInfo.player2 = reader["player2"].ToString();
+                }
+
+                K.SQL.SelectEnd(ref reader!);
+
+                string updateColumnName = string.Empty;
+
+                if (res.roomInfo.player1 == string.Empty)
+                {
+                    updateColumnName = "player1";
+                    res.roomInfo.player1 = userInfo.id;
+                }
+                else if (res.roomInfo.player2 == string.Empty)
+                {
+                    updateColumnName = "player2";
+                    res.roomInfo.player2 = userInfo.id;
+                }
+
+                if (updateColumnName == string.Empty)
+                    res.reason = "방 인원이 다 참";
+
+                if (K.SQL.Query(new Query().Update("roominfo", $"{updateColumnName} = '{res.roomInfo.player1}'", $"name = '{res.roomInfo.name}'")))
+                {
+                    res.completed = true;
+                    res.reason = "방 입장 성공";
+                }
+                else
+                {
+                    res.reason += ", UPDATE 실패";
+                }
+            }
+
+            packet.SetData(PacketType.RES_ENTER_ROOM_PACKET, Data<RES_EnterRoom>.Serialize(res));
+            token!.Send(packet);
+
+            Console.WriteLine($"{req.roomName}/{res.reason}");
+        }
+
+        private void REQ_CreateRoom(Packet packet)
+        {
+            Console.Write("REQ_CreateRoom : ");
+
+            var req = packet.GetPacket<REQ_CreateEnterRoom>();
+
+            RES_CreateRoom res = new RES_CreateRoom();
+
+            var where = K.Rooms!.Where(x => x.name == req.roomName);
+
+            res.completed = false;
+            res.reason = "존재하는 Room이름임";
+            res.roomName = req.roomName;
+
+            if (!where.Any())
+            {
+                res.reason = "INSERT 실패";
+
+                if (K.SQL!.Query(new Query().Insert("roominfo", "name", $"'{req.roomName}'")))
+                {
+                    res.completed = true;
+                    res.reason = "방 생성 성공";
+                    K.Rooms.Add(new RoomInfo { name = res.roomName, player1 = string.Empty, player2 = string.Empty });
+                }
+            }
+
+            packet.SetData(PacketType.RES_CREATE_ROOM_PACKET, Data<RES_CreateRoom>.Serialize(res));
+            token!.Send(packet);
+
+            Console.WriteLine($"{req.roomName}/{res.reason}");
+        }
+
         private void REQ_Login(Packet packet)
         {
             Console.Write("REQ_Login : ");
@@ -70,28 +165,36 @@ namespace GraduatedProject_Server
             RES res = new RES();
 
             MySqlDataReader reader;
-            GameManager.Instance.SQL!.Select(new Query().Select("id", "useraccount", $"id = '{req.id}' AND pw = sha2('{req.pw}', 256)"), out reader!);
 
             res.completed = true;
             res.reason = "로그인 성공";
 
-            if (!reader.HasRows)
+            if (!K.SQL!.Select(new Query().Select("id", "useraccount", $"id = '{req.id}' AND pw = sha2('{req.pw}', 256)"), out reader!))
             {
                 res.completed = false;
                 res.reason = "로그인 정보에 해당하는 유저가 존재하지 않음";
             }
 
-            GameManager.Instance.SQL!.SelectEnd(ref reader!);
+            K.SQL!.SelectEnd(ref reader!);
+
+            userInfo.id = req.id;
+            if (K.SQL.Select(new Query().Select("*", "userinfo", $"id = '{userInfo.id}'"), out reader!))
+            {
+                reader!.Read();
+                userInfo.win = (ushort)reader["win"];
+                userInfo.lose = (ushort)reader["lose"];
+            }
+            K.SQL!.SelectEnd(ref reader!);
 
             packet.SetData(PacketType.RES_LOGIN_PACKET, Data<RES>.Serialize(res));
             token!.Send(packet);
 
-            Console.WriteLine($"{req.id}");
+            Console.WriteLine($"{req.id}/{res.reason}");
         }
 
         private void REQ_Signin(Packet packet)
         {
-            Console.WriteLine("REQ_Signin");
+            Console.Write("REQ_Signin");
 
             var req = packet.GetPacket<REQ_Signin>();
 
@@ -110,16 +213,18 @@ namespace GraduatedProject_Server
             res.completed = false;
             res.reason = "INSERT 실패";
 
-            if (GameManager.Instance.SQL!.Query(new Query().Insert("useraccount", $"'{req.id}', sha2('{req.pw}',256)")))
+            if (K.SQL!.Query(new Query().Insert("useraccount", $"'{req.id}', sha2('{req.pw}',256)")))
             {
                 res.completed = true;
                 res.reason = "회원가입 성공";
 
-                GameManager.Instance.SQL!.Query(new Query().Insert("userinfo", $"'{req.id}',0,0,0"));
+                K.SQL!.Query(new Query().Insert("userinfo", $"'{req.id}',0,0,0"));
             }
 
             packet.SetData(PacketType.RES_SIGNIN_PACKET, Data<RES>.Serialize(res));
             token!.Send(packet);
+
+            Console.WriteLine($"/{res.reason}");
         }
 
         private void Disconnected(Packet packet)
@@ -151,7 +256,7 @@ namespace GraduatedProject_Server
             REQ_RES_Chat chat = packet.GetPacket<REQ_RES_Chat>();
             if (chat.to == "ALL")
             {
-                GameManager.Instance.Users!.ForEach(user =>
+                K.Users.ForEach(user =>
                 {
                     user.token!.Send(packet);
                 });
@@ -161,9 +266,9 @@ namespace GraduatedProject_Server
                 packet.type = ((short)PacketType.RES_CHAT_PACKET);
                 token!.Send(packet);
 
-                var where = GameManager.Instance.Users!.Where(user => user.userInfo.id == chat.id);
+                var where = K.Users.Where(user => user.userInfo.id == chat.id);
                 if (!where.Any()) return;
-                GameManager.Instance.Users!.Where(user => user.userInfo.id == chat.id).Select(x => x).FirstOrDefault()!.token!.Send(packet);
+                K.Users.Where(user => user.userInfo.id == chat.id).Select(x => x).FirstOrDefault()!.token!.Send(packet);
             }
         }
 
