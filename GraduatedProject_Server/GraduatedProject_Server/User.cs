@@ -11,7 +11,7 @@ namespace GraduatedProject_Server
     public class User
     {
         public UserInfo userInfo;
-        public string? to;
+        public RoomInfo roomInfo;
 
         public UserToken? token;
 
@@ -35,14 +35,18 @@ namespace GraduatedProject_Server
                     REQ_EnterRoom(packet);
                     break;
                 case PacketType.REQ_LEAVE_ROOM_PACKET:
+                    REQ_LeaveRoom(packet);
                     break;
                 case PacketType.REQ_ROOMS_PACKET:
+                    REQ_Rooms(packet);
                     break;
                 case PacketType.REQ_USER_PACKET:
                     break;
                 case PacketType.REQ_READY_GAME_PACKET:
+                    REQ_ReadyGame(packet);
                     break;
                 case PacketType.REQ_START_GAME_PACKET:
+                    REQ_StartGame(packet);
                     break;
                 case PacketType.REQ_SET_WIN_PACKET:
                     break;
@@ -63,6 +67,151 @@ namespace GraduatedProject_Server
             }
         }
 
+        private void REQ_StartGame(Packet packet)
+        {
+
+        }
+
+        private void REQ_Rooms(Packet packet)
+        {
+            Console.Write("REQ_Rooms : ");
+
+            var req = packet.GetPacket<REQ_Rooms>();
+
+            RES_Rooms res = new RES_Rooms();
+            res.roomInfos = new RoomInfo[9];
+            res.completed = true;
+            res.reason = "방이 없음";
+
+            List<RoomInfo> roomInfos = new List<RoomInfo>();
+
+            MySqlDataReader reader;
+            if (K.SQL.Select(new Query().Select("*", "roominfo"), out reader!))
+            {
+                res.reason = "방 목록 전송 성공";
+
+                string? name;
+                string? player1;
+                string? player2;
+
+                while (reader.Read())
+                {
+                    name = string.Empty;
+                    if (reader["name"].ToString() != null) name = reader["name"].ToString();
+                    player1 = string.Empty;
+                    if (reader["player1"].ToString() != null) player1 = reader["player1"].ToString();
+                    player2 = string.Empty;
+                    if (reader["player2"].ToString() != null) player2 = reader["player2"].ToString();
+
+                    roomInfos.Add(new RoomInfo
+                    {
+                        name = name,
+                        player1 = player1,
+                        player2 = player2,
+                    });
+                }
+
+                if (req.startIndex < roomInfos.Count)
+                {
+                    for (int i = req.startIndex; i < roomInfos.Count; i++)
+                        res.roomInfos[i] = roomInfos[i];
+                }
+            }
+            K.SQL.SelectEnd(ref reader!);
+
+            K.Send(token!, PacketType.RES_ROOMS_PACKET, res);
+
+            Console.WriteLine($"{res.reason}/방 {res.roomInfos.Length}개 전송");
+        }
+
+        private void REQ_ReadyGame(Packet packet)
+        {
+            Console.Write("REQ_ReadyGame : ");
+
+            var req = packet.GetPacket<REQ>();
+
+            RES res = new RES();
+            res.completed = false;
+            res.reason = "방이 존재하지 않음";
+
+            if (K.Rooms.Where(x => x.name == roomInfo.name).Any())
+            {
+                res.completed = true;
+
+                if (roomInfo.player1 == userInfo.id)
+                {
+                    roomInfo.player1Ready = !roomInfo.player1Ready;
+
+                    res.reason = "준비";
+                    if (!roomInfo.player1Ready)
+                        res.reason = "준비 안됨";
+                }
+                else if (roomInfo.player2 == userInfo.id)
+                {
+                    roomInfo.player2Ready = !roomInfo.player2Ready;
+
+                    res.reason = "준비";
+                    if (!roomInfo.player2Ready)
+                        res.reason = "준비 안됨";
+                }
+            }
+
+            K.Send(token!, PacketType.RES_READY_GAME_PACKET, res);
+
+            Console.WriteLine($"{userInfo.id}/{res.reason}");
+        }
+
+        private void REQ_LeaveRoom(Packet packet)
+        {
+            Console.Write($"REQ_LeaveRoom : ");
+
+            var req = packet.GetPacket<REQ>();
+
+            RES res = new RES();
+
+            string updatePlayerColumnName = string.Empty;
+
+            if (roomInfo.player1 == userInfo.id)
+            {
+                updatePlayerColumnName = "player1";
+                roomInfo.player1 = string.Empty;
+            }
+            else if (roomInfo.player2 == userInfo.id)
+            {
+                updatePlayerColumnName = "player2";
+                roomInfo.player2 = string.Empty;
+            }
+
+            if (K.SQL.Query(new Query().Update("roominfo", $"{updatePlayerColumnName} = NULL", $"name = '{roomInfo.name}'")))
+            {
+                res.completed = true;
+                res.reason = "방 떠나기 성공";
+
+                if (roomInfo.player1 == roomInfo.player2)
+                {
+                    if (K.SQL.Query(new Query().Delete("roominfo", $"name = '{roomInfo.name}'")))
+                    {
+                        res.completed = true;
+                        res.reason += " 방 삭제 성공";
+                    }
+                    else
+                    {
+                        res.completed = false;
+                        res.reason = "DELETE 실패";
+                    }
+                }
+            }
+            else
+            {
+                res.completed = false;
+                res.reason = "UPDATE 실패";
+            }
+
+            K.Send(token!, PacketType.RES_LEAVE_ROOM_PACKET, res);
+
+            Console.WriteLine($"{roomInfo.name}->{userInfo.id}/{res.reason}");
+        }
+
         private void REQ_EnterRoom(Packet packet)
         {
             Console.Write("REQ_EnterRoom : ");
@@ -79,6 +228,8 @@ namespace GraduatedProject_Server
 
             if (where.Any())
             {
+                res.roomInfo = where.FirstOrDefault();
+
                 MySqlDataReader reader;
                 if (K.SQL.Select(new Query().Select("*", "roominfo", $"name = '{req.roomName}'"), out reader!))
                 {
@@ -93,15 +244,29 @@ namespace GraduatedProject_Server
 
                 string updateColumnName = string.Empty;
 
+                RES res1 = new RES();
+                res1.completed = true;
+                res1.reason = userInfo.id;
+
                 if (res.roomInfo.player1 == string.Empty)
                 {
                     updateColumnName = "player1";
                     res.roomInfo.player1 = userInfo.id;
+
+                    if (res.roomInfo.player2 != string.Empty)
+                    {
+                        K.Send(K.Users.Where(x => x.userInfo.id == res.roomInfo.player2).FirstOrDefault()!.token!, PacketType.RES_OTHER_USER_ENTER_ROOM_PACKET, res1);
+                    }
                 }
                 else if (res.roomInfo.player2 == string.Empty)
                 {
                     updateColumnName = "player2";
                     res.roomInfo.player2 = userInfo.id;
+
+                    if (res.roomInfo.player1 != string.Empty)
+                    {
+                        K.Send(K.Users.Where(x => x.userInfo.id == res.roomInfo.player1).FirstOrDefault()!.token!, PacketType.RES_OTHER_USER_ENTER_ROOM_PACKET, res1);
+                    }
                 }
 
                 if (updateColumnName == string.Empty)
@@ -111,15 +276,18 @@ namespace GraduatedProject_Server
                 {
                     res.completed = true;
                     res.reason = "방 입장 성공";
+
+                    roomInfo = res.roomInfo;
                 }
                 else
                 {
-                    res.reason += ", UPDATE 실패";
+                    res.reason += " UPDATE 실패";
                 }
             }
 
-            packet.SetData(PacketType.RES_ENTER_ROOM_PACKET, Data<RES_EnterRoom>.Serialize(res));
-            token!.Send(packet);
+            roomInfo = res.roomInfo;
+
+            K.Send(token!, PacketType.RES_ENTER_ROOM_PACKET, res);
 
             Console.WriteLine($"{req.roomName}/{res.reason}");
         }
@@ -150,8 +318,7 @@ namespace GraduatedProject_Server
                 }
             }
 
-            packet.SetData(PacketType.RES_CREATE_ROOM_PACKET, Data<RES_CreateRoom>.Serialize(res));
-            token!.Send(packet);
+            K.Send(token!, PacketType.RES_CREATE_ROOM_PACKET, res);
 
             Console.WriteLine($"{req.roomName}/{res.reason}");
         }
@@ -169,12 +336,26 @@ namespace GraduatedProject_Server
             res.completed = true;
             res.reason = "로그인 성공";
 
+            var where = K.Users.Where(x => x.userInfo.isLogined && x.userInfo.id == req.id);
+
+            if (where.Any())
+            {
+                res.completed = false;
+                res.reason = "중복 로그인";
+
+                K.Send(token!, PacketType.RES_LOGIN_PACKET, res);
+                return;
+            }
+
             if (!K.SQL!.Select(new Query().Select("id", "useraccount", $"id = '{req.id}' AND pw = sha2('{req.pw}', 256)"), out reader!))
             {
                 res.completed = false;
                 res.reason = "로그인 정보에 해당하는 유저가 존재하지 않음";
-            }
 
+                K.Send(token!, PacketType.RES_LOGIN_PACKET, res);
+                K.SQL!.SelectEnd(ref reader!);
+                return;
+            }
             K.SQL!.SelectEnd(ref reader!);
 
             userInfo.id = req.id;
@@ -186,8 +367,7 @@ namespace GraduatedProject_Server
             }
             K.SQL!.SelectEnd(ref reader!);
 
-            packet.SetData(PacketType.RES_LOGIN_PACKET, Data<RES>.Serialize(res));
-            token!.Send(packet);
+            K.Send(token!, PacketType.RES_LOGIN_PACKET, res);
 
             Console.WriteLine($"{req.id}/{res.reason}");
         }
@@ -205,10 +385,22 @@ namespace GraduatedProject_Server
                 res.completed = false;
                 res.reason = "비밀번호와 확인비밀번호가 일치하지 않음";
 
-                packet.SetData(PacketType.RES_SIGNIN_PACKET, Data<RES>.Serialize(res));
-                token!.Send(packet);
+                K.Send(token!, PacketType.RES_SIGNIN_PACKET, res);
                 return;
             }
+
+            MySqlDataReader reader;
+            if (K.SQL!.Select(new Query().Select("*", "useraccount", $"id = '{req.id}'"), out reader!))
+            {
+                res.completed = false;
+                res.reason = "이미 있는 계정임";
+
+                K.Send(token!, PacketType.RES_SIGNIN_PACKET, res);
+                K.SQL!.SelectEnd(ref reader!);
+                Console.WriteLine($"/{res.reason}");
+                return;
+            }
+            K.SQL!.SelectEnd(ref reader!);
 
             res.completed = false;
             res.reason = "INSERT 실패";
@@ -218,11 +410,10 @@ namespace GraduatedProject_Server
                 res.completed = true;
                 res.reason = "회원가입 성공";
 
-                K.SQL!.Query(new Query().Insert("userinfo", $"'{req.id}',0,0,0"));
+                K.SQL!.Query(new Query().Insert("userinfo", $"'{req.id}',0,0"));
             }
 
-            packet.SetData(PacketType.RES_SIGNIN_PACKET, Data<RES>.Serialize(res));
-            token!.Send(packet);
+            K.Send(token!, PacketType.RES_SIGNIN_PACKET, res);
 
             Console.WriteLine($"/{res.reason}");
         }
@@ -235,8 +426,7 @@ namespace GraduatedProject_Server
             res.completed = true;
             res.reason = "Disonnected";
 
-            packet.SetData(PacketType.CONNECTED, Data<RES>.Serialize(res));
-            token!.Send(packet);
+            K.Send(token!, PacketType.DISCONNECTED, res);
         }
 
         private void Connected(Packet packet)
@@ -247,14 +437,16 @@ namespace GraduatedProject_Server
             res.completed = true;
             res.reason = "Connected";
 
-            packet.SetData(PacketType.CONNECTED, Data<RES>.Serialize(res));
-            token!.Send(packet);
+            K.Send(token!, PacketType.CONNECTED, res);
         }
 
         private void REQ_Chat(Packet packet)
         {
-            REQ_RES_Chat chat = packet.GetPacket<REQ_RES_Chat>();
-            if (chat.to == "ALL")
+            REQ_RES_Chat req = packet.GetPacket<REQ_RES_Chat>();
+
+            packet.type = ((short)PacketType.RES_CHAT_PACKET);
+
+            if (req.to == "ALL")
             {
                 K.Users.ForEach(user =>
                 {
@@ -263,13 +455,14 @@ namespace GraduatedProject_Server
             }
             else
             {
-                packet.type = ((short)PacketType.RES_CHAT_PACKET);
                 token!.Send(packet);
 
-                var where = K.Users.Where(user => user.userInfo.id == chat.id);
+                var where = K.Users.Where(user => user.userInfo.id == req.id);
                 if (!where.Any()) return;
-                K.Users.Where(user => user.userInfo.id == chat.id).Select(x => x).FirstOrDefault()!.token!.Send(packet);
+                K.Users.Where(user => user.userInfo.id == req.id).Select(x => x).FirstOrDefault()!.token!.Send(packet);
             }
+
+            Console.WriteLine($"{req.id} chat to {req.to}, {req.chat}");
         }
 
         public void Init(UserToken token)
