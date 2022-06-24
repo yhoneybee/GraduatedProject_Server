@@ -19,7 +19,7 @@ namespace GraduatedProject_Server
         {
             switch ((PacketType)packet.type)
             {
-                case PacketType.CONNECTED:
+                case PacketType.REQ_CONNECTED:
                     Connected(packet);
                     break;
                 case PacketType.REQ_SIGNIN_PACKET:
@@ -60,7 +60,7 @@ namespace GraduatedProject_Server
                     break;
                 case PacketType.REQ_LOGOUT_PACKET:
                     break;
-                case PacketType.DISCONNECTED:
+                case PacketType.REQ_DISCONNECTED:
                     Disconnected(packet);
                     break;
                 case PacketType.END:
@@ -87,7 +87,7 @@ namespace GraduatedProject_Server
 
             User user1;
             User user2;
-            RES res = new RES();
+            RES_StartGame res = new RES_StartGame();
 
             Refresh(out user1, out user2);
 
@@ -98,7 +98,9 @@ namespace GraduatedProject_Server
                     res.completed = true;
                     res.reason = "모두 준비 중 게임 시작";
 
+                    res.playerNum = 0;
                     K.Send(user1!.token!, PacketType.RES_START_GAME_PACKET, res);
+                    res.playerNum = 1;
                     K.Send(user2!.token!, PacketType.RES_START_GAME_PACKET, res);
                 }
                 else
@@ -106,6 +108,11 @@ namespace GraduatedProject_Server
                     res.completed = false;
                     res.reason = "모두 준비 중이 아님";
                 }
+            }
+            else
+            {
+                res.completed = false;
+                res.reason = "유저가 2명이 아님";
             }
 
             Console.WriteLine($"{res.reason}");
@@ -243,42 +250,48 @@ namespace GraduatedProject_Server
 
             RES res = new RES();
 
-            string updatePlayerColumnName = string.Empty;
+            MySqlDataReader reader;
 
-            if (roomInfo.player1 == userInfo.id)
+            if (K.SQL.Select(new Query().Select("*", "roominfo", $"name = '{roomInfo.name}'"), out reader!))
             {
-                updatePlayerColumnName = "player1";
-                roomInfo.player1 = string.Empty;
-            }
-            else if (roomInfo.player2 == userInfo.id)
-            {
-                updatePlayerColumnName = "player2";
-                roomInfo.player2 = string.Empty;
-            }
+                reader.Read();
 
-            if (K.SQL.Query(new Query().Update("roominfo", $"{updatePlayerColumnName} = NULL", $"name = '{roomInfo.name}'")))
-            {
-                res.completed = true;
-                res.reason = "방 떠나기 성공";
+                var player1 = reader["player1"].ToString();
+                var player2 = reader["player2"].ToString();
 
-                if (roomInfo.player1 == roomInfo.player2)
+                K.SQL.SelectEnd(ref reader!);
+
+                if (player1 == string.Empty || player2 == string.Empty)
                 {
+                    res.completed = false;
+                    Console.Write($"방에 유저가 1명 이하이므로 방 삭제/");
+
                     if (K.SQL.Query(new Query().Delete("roominfo", $"name = '{roomInfo.name}'")))
                     {
                         res.completed = true;
-                        res.reason += " 방 삭제 성공";
+                        res.reason = "방이 삭제됨";
+                        Console.Write($"삭제 성공/");
                     }
-                    else
+                }
+                else
+                {
+                    res.completed = false;
+                    Console.Write($"방에 유저가 2명 이므로 방 떠나기/");
+
+                    var updateColumnName = player1 == userInfo.id ? "player1" : "player2";
+
+                    if (K.SQL.Query(new Query().Update("roominfo", $"{updateColumnName} = NULL", $"name = '{roomInfo.name}'")))
                     {
-                        res.completed = false;
-                        res.reason = "DELETE 실패";
+                        res.completed = true;
+                        res.reason = "방에서 떠남";
+                        Console.Write($"떠나기 성공/");
                     }
                 }
             }
             else
             {
                 res.completed = false;
-                res.reason = "UPDATE 실패";
+                res.reason = "떠날 방이 없음";
             }
 
             K.Send(token!, PacketType.RES_LEAVE_ROOM_PACKET, res);
@@ -503,7 +516,7 @@ namespace GraduatedProject_Server
             res.completed = true;
             res.reason = "Disonnected";
 
-            K.Send(token!, PacketType.DISCONNECTED, res);
+            K.Send(token!, PacketType.RES_DISCONNECTED, res);
         }
 
         private void Connected(Packet packet)
@@ -514,7 +527,7 @@ namespace GraduatedProject_Server
             res.completed = true;
             res.reason = "Connected";
 
-            K.Send(token!, PacketType.CONNECTED, res);
+            K.Send(token!, PacketType.RES_CONNECTED, res);
         }
 
         private void REQ_Chat(Packet packet)
