@@ -59,6 +59,7 @@ namespace GraduatedProject_Server
                     REQ_Charactor(packet);
                     break;
                 case PacketType.REQ_LOGOUT_PACKET:
+                    REQ_Logout(packet);
                     break;
                 case PacketType.REQ_DISCONNECTED:
                     Disconnected(packet);
@@ -66,6 +67,28 @@ namespace GraduatedProject_Server
                 case PacketType.END:
                     break;
             }
+        }
+
+        private void REQ_Logout(Packet packet)
+        {
+            Console.Write("REQ_Logout : ");
+
+            RES res = new RES();
+
+            if (K.SQL.Query(new Query().Update("userinfo", $"isLogined = 0", $"id = '{userInfo.id}'")))
+            {
+                res.completed = true;
+                res.reason = "로그아웃 성공";
+            }
+            else
+            {
+                res.completed = false;
+                res.reason = "로그아웃 실패";
+            }
+
+            K.Send(token!, PacketType.RES_LOGOUT_PACKET, res);
+
+            Console.WriteLine($"{res.reason}");
         }
 
         private void REQ_Charactor(Packet packet)
@@ -294,6 +317,8 @@ namespace GraduatedProject_Server
                 res.reason = "떠날 방이 없음";
             }
 
+            K.SQL.SelectEnd(ref reader!);
+
             K.Send(token!, PacketType.RES_LEAVE_ROOM_PACKET, res);
 
             Console.WriteLine($"{roomInfo.name}->{userInfo.id}/{res.reason}");
@@ -423,39 +448,44 @@ namespace GraduatedProject_Server
 
             MySqlDataReader reader;
 
-            res.completed = true;
-            res.reason = "로그인 성공";
+            if (K.SQL.Select(new Query().Select("*", "useraccount", $"id = '{req.id}' AND pw = sha2('{req.pw}', 256)"), out reader!))
+            {
+                K.SQL.SelectEnd(ref reader!);
 
-            var where = K.Users.Where(x => x.userInfo.isLogined && x.userInfo.id == req.id);
+                if (K.SQL.Select(new Query().Select("*", "userinfo", $"id = '{req.id}'"), out reader!))
+                {
+                    reader.Read();
+                    userInfo.win = (ushort)reader["win"];
+                    userInfo.lose = (ushort)reader["lose"];
+                    var isLogined = Convert.ToBoolean(reader["isLogined"]);
 
-            if (where.Any())
+                    K.SQL.SelectEnd(ref reader!);
+
+                    if (isLogined)
+                    {
+                        res.completed = false;
+                        res.reason = "중복 로그인";
+                    }
+                    else
+                    {
+                        res.completed = false;
+                        res.reason = "로그인 실패";
+
+                        if (K.SQL.Query(new Query().Update("userinfo", $"isLogined = 1", $"id = '{req.id}'")))
+                        {
+                            res.completed = true;
+                            res.reason = "로그인 성공";
+                            userInfo.id = req.id;
+                        }
+                    }
+                }
+            }
+            else
             {
                 res.completed = false;
-                res.reason = "중복 로그인";
-
-                K.Send(token!, PacketType.RES_LOGIN_PACKET, res);
-                return;
+                res.reason = "로그인 정보에 해당하는 유저 정보가 없음";
             }
-
-            if (!K.SQL!.Select(new Query().Select("id", "useraccount", $"id = '{req.id}' AND pw = sha2('{req.pw}', 256)"), out reader!))
-            {
-                res.completed = false;
-                res.reason = "로그인 정보에 해당하는 유저가 존재하지 않음";
-
-                K.Send(token!, PacketType.RES_LOGIN_PACKET, res);
-                K.SQL!.SelectEnd(ref reader!);
-                return;
-            }
-            K.SQL!.SelectEnd(ref reader!);
-
-            userInfo.id = req.id;
-            if (K.SQL.Select(new Query().Select("*", "userinfo", $"id = '{userInfo.id}'"), out reader!))
-            {
-                reader!.Read();
-                userInfo.win = (ushort)reader["win"];
-                userInfo.lose = (ushort)reader["lose"];
-            }
-            K.SQL!.SelectEnd(ref reader!);
+            K.SQL.SelectEnd(ref reader!);
 
             K.Send(token!, PacketType.RES_LOGIN_PACKET, res);
 
@@ -500,7 +530,7 @@ namespace GraduatedProject_Server
                 res.completed = true;
                 res.reason = "회원가입 성공";
 
-                K.SQL!.Query(new Query().Insert("userinfo", $"'{req.id}',0,0"));
+                K.SQL!.Query(new Query().Insert("userinfo", $"'{req.id}',0,0,0,0"));
             }
 
             K.Send(token!, PacketType.RES_SIGNIN_PACKET, res);

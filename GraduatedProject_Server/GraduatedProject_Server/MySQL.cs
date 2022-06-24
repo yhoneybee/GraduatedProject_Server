@@ -111,8 +111,8 @@ namespace GraduatedProject_Server
 
         public bool SelectEnd(ref MySqlDataReader? reader)
         {
-            reader!.Close();
-            reader.Dispose();
+            reader?.Close();
+            reader?.Dispose();
             reader = null;
             return true;
         }
