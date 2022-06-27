@@ -11,7 +11,7 @@ namespace GraduatedProject_Server
     public class User
     {
         public UserInfo userInfo;
-        public RoomInfo roomInfo;
+        public CRoomInfo? roomInfo;
 
         public UserToken? token;
 
@@ -58,6 +58,9 @@ namespace GraduatedProject_Server
                 case PacketType.REQ_CHARACTOR_PACKET:
                     REQ_Charactor(packet);
                     break;
+                case PacketType.REQ_STAT_PACKET:
+                    REQ_Stat(packet);
+                    break;
                 case PacketType.REQ_LOGOUT_PACKET:
                     REQ_Logout(packet);
                     break;
@@ -69,16 +72,24 @@ namespace GraduatedProject_Server
             }
         }
 
+        #region legacy
+        private void REQ_Stat(Packet packet)
+        {
+            packet.type = ((short)PacketType.RES_STAT_PACKET);
+            TossPacketToOther(packet);
+        }
+
         private void REQ_Logout(Packet packet)
         {
             Console.Write("REQ_Logout : ");
 
             RES res = new RES();
 
-            if (K.SQL.Query(new Query().Update("userinfo", $"isLogined = 0", $"id = '{userInfo.id}'")))
+            if (UpdateUserIsLogin(false))
             {
                 res.completed = true;
                 res.reason = "로그아웃 성공";
+                userInfo = new();
             }
             else
             {
@@ -94,48 +105,29 @@ namespace GraduatedProject_Server
         private void REQ_Charactor(Packet packet)
         {
             packet.type = ((short)PacketType.RES_CHARACTOR_PACKET);
-            if (roomInfo.player1 == userInfo.id)
-            {
-                K.Users.Where(x => x.userInfo.id == roomInfo.player2).FirstOrDefault()!.token!.Send(packet);
-            }
-            else if (roomInfo.player2 == userInfo.id)
-            {
-                K.Users.Where(x => x.userInfo.id == roomInfo.player1).FirstOrDefault()!.token!.Send(packet);
-            }
+            TossPacketToOther(packet);
         }
 
         private void REQ_StartGame(Packet packet)
         {
             Console.Write("REQ_StartGame : ");
 
-            User user1;
-            User user2;
             RES_StartGame res = new RES_StartGame();
 
-            Refresh(out user1, out user2);
-
-            if (user1 != null && user2 != null)
+            if (CheckReady())
             {
-                if (user1!.roomInfo.player1Ready && user1!.roomInfo.player2Ready && user2!.roomInfo.player1Ready && user2!.roomInfo.player2Ready)
-                {
-                    res.completed = true;
-                    res.reason = "모두 준비 중 게임 시작";
+                res.completed = true;
+                res.reason = "게임 시작";
 
-                    res.playerNum = 0;
-                    K.Send(user1!.token!, PacketType.RES_START_GAME_PACKET, res);
-                    res.playerNum = 1;
-                    K.Send(user2!.token!, PacketType.RES_START_GAME_PACKET, res);
-                }
-                else
-                {
-                    res.completed = false;
-                    res.reason = "모두 준비 중이 아님";
-                }
+                res.playerNum = roomInfo!.roomInfo.player1 == userInfo.id ? 0 : 1;
+                K.Send(token!, PacketType.RES_START_GAME_PACKET, res);
+                res.playerNum = res.playerNum == 1 ? 0 : 1;
+                K.Send(GetOther()?.token!, PacketType.RES_START_GAME_PACKET, res);
             }
             else
             {
                 res.completed = false;
-                res.reason = "유저가 2명이 아님";
+                res.reason = "게임 시작 실패";
             }
 
             Console.WriteLine($"{res.reason}");
@@ -147,122 +139,51 @@ namespace GraduatedProject_Server
 
             var req = packet.GetPacket<REQ_Rooms>();
 
+            int startIndex = req.page * 9;
+            int count = 0;
+
             RES_Rooms res = new RES_Rooms();
             res.roomInfos = new RoomInfo[9];
             res.completed = true;
-            res.reason = "방이 없음";
 
-            List<RoomInfo> roomInfos = new List<RoomInfo>();
-
-            MySqlDataReader reader;
-            if (K.SQL.Select(new Query().Select("*", "roominfo"), out reader!))
+            for (int i = 0; i < 9; i++)
             {
-                res.reason = "방 목록 전송 성공";
+                res.roomInfos[i] = new RoomInfo();
+                res.roomInfos[i].name = res.roomInfos[i].player1 = res.roomInfos[i].player2 = string.Empty;
+            }
 
-                string? name;
-                string? player1;
-                string? player2;
-
-                while (reader.Read())
+            for (int i = 0; i < K.Rooms.Count; i++)
+            {
+                if (i >= startIndex)
                 {
-                    name = string.Empty;
-                    if (reader["name"].ToString() != null) name = reader["name"].ToString();
-                    player1 = string.Empty;
-                    if (reader["player1"].ToString() != null) player1 = reader["player1"].ToString();
-                    player2 = string.Empty;
-                    if (reader["player2"].ToString() != null) player2 = reader["player2"].ToString();
-
-                    roomInfos.Add(new RoomInfo
-                    {
-                        name = name,
-                        player1 = player1,
-                        player2 = player2,
-                    });
-                }
-
-                if (req.startIndex < roomInfos.Count)
-                {
-                    for (int i = req.startIndex; i < roomInfos.Count; i++)
-                        res.roomInfos[i] = roomInfos[i];
+                    ++count;
+                    res.roomInfos[i] = K.Rooms[i].roomInfo;
+                    if (count == 9)
+                        break;
                 }
             }
-            K.SQL.SelectEnd(ref reader!);
+
+            res.reason = $"{count}개 전송 성공";
 
             K.Send(token!, PacketType.RES_ROOMS_PACKET, res);
 
-            Console.WriteLine($"{res.reason}/방 {res.roomInfos.Length}개 전송");
+            Console.WriteLine($"{res.reason}");
         }
 
         private void REQ_ReadyGame(Packet packet)
         {
             Console.Write("REQ_ReadyGame : ");
 
-            var req = packet.GetPacket<REQ>();
-
             RES res = new RES();
             res.completed = false;
-            res.reason = "방이 존재하지 않음";
 
-            User user1 = K.Users.Where(x => x.userInfo.id == roomInfo.player1).FirstOrDefault()!;
-            User user2 = K.Users.Where(x => x.userInfo.id == roomInfo.player2).FirstOrDefault()!;
-
-            if (K.Rooms.Where(x => x.name == roomInfo.name).Any())
-            {
-                res.completed = true;
-
-                MySqlDataReader reader;
-                if (K.SQL.Select(new Query().Select("*", "roominfo", $"name = '{roomInfo.name}'"), out reader!))
-                {
-                    reader!.Read();
-                    if (reader["player1"] != null)
-                        roomInfo.player1 = reader["player1"].ToString();
-                    if (reader["player2"] != null)
-                        roomInfo.player2 = reader["player2"].ToString();
-                }
-                K.SQL.SelectEnd(ref reader!);
-
-                if (roomInfo.player1 == userInfo.id)
-                {
-                    roomInfo.player1Ready = !roomInfo.player1Ready;
-
-                    if (roomInfo.player2 != string.Empty)
-                        Refresh(out user1, out user2);
-
-                    res.reason = "준비";
-                    if (!roomInfo.player1Ready)
-                        res.reason = "준비 안됨";
-                }
-                else if (roomInfo.player2 == userInfo.id)
-                {
-                    roomInfo.player2Ready = !roomInfo.player2Ready;
-
-                    if (roomInfo.player1 != string.Empty)
-                        Refresh(out user1, out user2);
-
-                    res.reason = "준비";
-                    if (!roomInfo.player2Ready)
-                        res.reason = "준비 안됨";
-                }
-            }
+            ReverseReady();
+            UpdateReady();
+            res.reason = $"player1 {roomInfo!.roomInfo.player1Ready}, player2 {roomInfo!.roomInfo.player2Ready}";
 
             K.Send(token!, PacketType.RES_READY_GAME_PACKET, res);
 
             Console.WriteLine($"{userInfo.id}/{res.reason}");
-        }
-
-        private void Refresh(out User user1, out User user2)
-        {
-            user1 = K.Users.Where(x => x.userInfo.id == roomInfo.player1).FirstOrDefault()!;
-            user2 = K.Users.Where(x => x.userInfo.id == roomInfo.player2).FirstOrDefault()!;
-
-            if (user1 != null && user2 != null)
-            {
-                user1.roomInfo.player2 = user2!.roomInfo.player2;
-                user2.roomInfo.player1 = user1!.roomInfo.player1;
-
-                user1.roomInfo.player2Ready = user2!.roomInfo.player2Ready;
-                user2.roomInfo.player1Ready = user1!.roomInfo.player1Ready;
-            }
         }
 
         private void REQ_LeaveRoom(Packet packet)
@@ -275,7 +196,7 @@ namespace GraduatedProject_Server
 
             MySqlDataReader reader;
 
-            if (K.SQL.Select(new Query().Select("*", "roominfo", $"name = '{roomInfo.name}'"), out reader!))
+            if (K.SQL.Select(new Query().Select("*", "roominfo", $"name = '{roomInfo!.roomInfo.name}'"), out reader!))
             {
                 reader.Read();
 
@@ -289,7 +210,7 @@ namespace GraduatedProject_Server
                     res.completed = false;
                     Console.Write($"방에 유저가 1명 이하이므로 방 삭제/");
 
-                    if (K.SQL.Query(new Query().Delete("roominfo", $"name = '{roomInfo.name}'")))
+                    if (K.SQL.Query(new Query().Delete("roominfo", $"name = '{roomInfo!.roomInfo.name}'")))
                     {
                         res.completed = true;
                         res.reason = "방이 삭제됨";
@@ -303,7 +224,7 @@ namespace GraduatedProject_Server
 
                     var updateColumnName = player1 == userInfo.id ? "player1" : "player2";
 
-                    if (K.SQL.Query(new Query().Update("roominfo", $"{updateColumnName} = NULL", $"name = '{roomInfo.name}'")))
+                    if (K.SQL.Query(new Query().Update("roominfo", $"{updateColumnName} = NULL", $"name = '{roomInfo!.roomInfo.name}'")))
                     {
                         res.completed = true;
                         res.reason = "방에서 떠남";
@@ -321,7 +242,7 @@ namespace GraduatedProject_Server
 
             K.Send(token!, PacketType.RES_LEAVE_ROOM_PACKET, res);
 
-            Console.WriteLine($"{roomInfo.name}->{userInfo.id}/{res.reason}");
+            Console.WriteLine($"{roomInfo!.roomInfo.name}->{userInfo.id}/{res.reason}");
         }
 
         private void REQ_EnterRoom(Packet packet)
@@ -332,75 +253,44 @@ namespace GraduatedProject_Server
 
             RES_EnterRoom res = new RES_EnterRoom();
             res.roomInfo.name = req.roomName;
-
-            var where = K.Rooms!.Where(x => x.name == req.roomName);
-
             res.completed = false;
-            res.reason = "존재하지 않는 방";
+            res.reason = "입장 실패";
 
-            if (where.Any())
+            CRoomInfo room = GetRoomInfo(req.roomName);
+
+            string updateColumnName = string.Empty;
+
+            RES_User res1 = new RES_User();
+            res1.completed = true;
+            res1.reason = "접속한 플레이어의 대한 정보";
+            res1.userInfo = userInfo;
+
+            if (room.roomInfo.name == req.roomName)
             {
-                res.roomInfo = where.FirstOrDefault();
-
-                MySqlDataReader reader;
-                if (K.SQL.Select(new Query().Select("*", "roominfo", $"name = '{req.roomName}'"), out reader!))
+                if (room.roomInfo.player1 == string.Empty)
                 {
-                    reader!.Read();
-                    if (reader["player1"] != null)
-                        res.roomInfo.player1 = reader["player1"].ToString();
-                    if (reader["player2"] != null)
-                        res.roomInfo.player2 = reader["player2"].ToString();
-                }
-                K.SQL.SelectEnd(ref reader!);
-
-                string updateColumnName = string.Empty;
-
-                RES res1 = new RES();
-                res1.completed = true;
-                res1.reason = userInfo.id;
-
-                if (res.roomInfo.player1 == string.Empty)
-                {
+                    room.roomInfo.player1 = userInfo.id;
+                    res.host = true;
                     updateColumnName = "player1";
-                    res.roomInfo.player1 = userInfo.id;
-
-                    if (res.roomInfo.player2 != string.Empty)
-                    {
-                        K.Send(K.Users.Where(x => x.userInfo.id == res.roomInfo.player2).FirstOrDefault()!.token!, PacketType.RES_OTHER_USER_ENTER_ROOM_PACKET, res1);
-                    }
                 }
-                else if (res.roomInfo.player2 == string.Empty)
+                else if (room.roomInfo.player2 == string.Empty)
                 {
+                    room.roomInfo.player2 = userInfo.id;
+                    res.host = false;
                     updateColumnName = "player2";
-                    res.roomInfo.player2 = userInfo.id;
-
-                    if (res.roomInfo.player1 != string.Empty)
-                    {
-                        K.Send(K.Users.Where(x => x.userInfo.id == res.roomInfo.player1).FirstOrDefault()!.token!, PacketType.RES_OTHER_USER_ENTER_ROOM_PACKET, res1);
-                    }
                 }
 
-                if (updateColumnName == string.Empty)
-                    res.reason = "방 인원이 다 참";
-                else
-                {
-                    if (K.SQL.Query(new Query().Update("roominfo", $"{updateColumnName} = '{userInfo.id}'", $"name = '{res.roomInfo.name}'")))
-                    {
-                        res.completed = true;
-                        res.reason = "방 입장 성공";
-                    }
-                    else
-                    {
-                        res.reason += " UPDATE 실패";
-                    }
-                }
+                packet.SetData(PacketType.RES_OTHER_USER_ENTER_ROOM_PACKET, Data<RES_User>.Serialize(res1));
+                GetOther()?.token?.Send(packet);
             }
 
-            roomInfo.name = res.roomInfo.name;
-            roomInfo.player1 = res.roomInfo.player1;
-            roomInfo.player1Ready = res.roomInfo.player1Ready;
-            roomInfo.player2 = res.roomInfo.player2;
-            roomInfo.player2Ready = res.roomInfo.player2Ready;
+            if (UpdateRoomInfo(updateColumnName, req.roomName, false))
+            {
+                res.completed = true;
+                res.reason = "입장 성공";
+            }
+
+            roomInfo = room;
 
             K.Send(token!, PacketType.RES_ENTER_ROOM_PACKET, res);
 
@@ -415,7 +305,7 @@ namespace GraduatedProject_Server
 
             RES_CreateRoom res = new RES_CreateRoom();
 
-            var where = K.Rooms!.Where(x => x.name == req.roomName);
+            var where = K.Rooms!.Where(x => x.roomInfo.name == req.roomName);
 
             res.completed = false;
             res.reason = "존재하는 Room이름임";
@@ -429,7 +319,9 @@ namespace GraduatedProject_Server
                 {
                     res.completed = true;
                     res.reason = "방 생성 성공";
-                    K.Rooms.Add(new RoomInfo { name = res.roomName, player1 = string.Empty, player2 = string.Empty });
+                    var room = new CRoomInfo();
+                    room.roomInfo = new RoomInfo { name = res.roomName, player1 = string.Empty, player2 = string.Empty };
+                    K.Rooms.Add(room);
                 }
             }
 
@@ -470,12 +362,12 @@ namespace GraduatedProject_Server
                     {
                         res.completed = false;
                         res.reason = "로그인 실패";
+                        userInfo.id = req.id;
 
-                        if (K.SQL.Query(new Query().Update("userinfo", $"isLogined = 1", $"id = '{req.id}'")))
+                        if (UpdateUserIsLogin(true))
                         {
                             res.completed = true;
                             res.reason = "로그인 성공";
-                            userInfo.id = req.id;
                         }
                     }
                 }
@@ -557,6 +449,8 @@ namespace GraduatedProject_Server
             res.completed = true;
             res.reason = "Connected";
 
+            roomInfo = new CRoomInfo();
+
             K.Send(token!, PacketType.RES_CONNECTED, res);
         }
 
@@ -584,6 +478,56 @@ namespace GraduatedProject_Server
 
             Console.WriteLine($"{req.id} chat to {req.to}, {req.chat}");
         }
+        #endregion
+
+        public bool UpdateUserIsLogin(bool isLogin)
+            => K.SQL.Query(new Query().Update("userinfo", $"isLogined = {(isLogin ? 1 : 0)}", $"id = '{userInfo.id}'"));
+
+        public void TossPacketToOther(Packet packet)
+            => GetOther()?.token?.Send(packet);
+
+        public User? GetOther()
+        {
+            if (roomInfo!.roomInfo.player1 == userInfo.id)
+                return K.Users.Where(x => x.userInfo.id == roomInfo!.roomInfo.player2).FirstOrDefault()!;
+            else if (roomInfo!.roomInfo.player2 == userInfo.id)
+                return K.Users.Where(x => x.userInfo.id == roomInfo!.roomInfo.player1).FirstOrDefault()!;
+            else
+                return null;
+        }
+
+        public void UpdateReady()
+        {
+            var other = GetOther();
+
+            if (other == null) return;
+
+            if (roomInfo!.roomInfo.player1 == userInfo.id)
+                roomInfo!.roomInfo.player2Ready = other!.roomInfo!.roomInfo.player2Ready;
+            else if (roomInfo!.roomInfo.player2 == userInfo.id)
+                roomInfo!.roomInfo.player1Ready = other!.roomInfo!.roomInfo.player1Ready;
+        }
+
+        public void ReverseReady()
+        {
+            if (roomInfo!.roomInfo.player1 == userInfo.id)
+                roomInfo!.roomInfo.player1Ready = !roomInfo!.roomInfo.player1Ready;
+            else if (roomInfo!.roomInfo.player2 == userInfo.id)
+                roomInfo!.roomInfo.player2Ready = !roomInfo!.roomInfo.player2Ready;
+        }
+
+        public bool CheckReady()
+        {
+            UpdateReady();
+
+            return roomInfo!.roomInfo.player1Ready && roomInfo!.roomInfo.player2Ready;
+        }
+
+        public CRoomInfo GetRoomInfo(string name)
+            => K.Rooms!.Where(x => x.roomInfo.name == name)!.FirstOrDefault()!;
+
+        public bool UpdateRoomInfo(string updateColumnName, string roomName, bool overlapToNull)
+            => K.SQL.Query(new Query().Update("roominfo", $"{updateColumnName} = '{(overlapToNull ? "NULL" : userInfo.id)}'", $"name = '{roomName}'"));
 
         public void Init(UserToken token)
         {

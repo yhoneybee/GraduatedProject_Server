@@ -10,7 +10,7 @@ namespace GraduatedProject_Server
     public static class K
     {
         public static List<User> Users { get; set; } = new List<User>();
-        public static List<RoomInfo> Rooms { get; set; } = new List<RoomInfo>();
+        public static List<CRoomInfo> Rooms { get; set; } = new List<CRoomInfo>();
         public static ISQL SQL { get; set; } = new MySQL();
 
         public static void Send<T>(UserToken token, PacketType packetType, T res)
