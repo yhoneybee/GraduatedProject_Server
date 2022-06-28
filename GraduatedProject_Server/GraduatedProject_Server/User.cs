@@ -217,7 +217,7 @@ namespace GraduatedProject_Server
             RES_OtherUser res1 = new RES_OtherUser();
             res1.completed = true;
             res1.reason = "퇴장한 플레이어의 대한 정보";
-            res1.roomInfo = room.roomInfo;
+            res1.roomInfo = room?.roomInfo ?? new();
 
             if (room == null)
             {
@@ -376,8 +376,8 @@ namespace GraduatedProject_Server
                 if (K.SQL.Select(new Query().Select("*", "userinfo", $"id = '{req.id}'"), out reader!))
                 {
                     reader.Read();
-                    userInfo.win = (ushort)reader["win"];
-                    userInfo.lose = (ushort)reader["lose"];
+                    userInfo.win = (uint)reader["win"];
+                    userInfo.lose = (uint)reader["lose"];
                     var isLogined = Convert.ToBoolean(reader["isLogined"]);
 
                     K.SQL.SelectEnd(ref reader!);
