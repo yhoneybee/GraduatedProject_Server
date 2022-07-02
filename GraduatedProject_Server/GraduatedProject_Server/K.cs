@@ -13,12 +13,12 @@ namespace GraduatedProject_Server
         public static List<CRoomInfo> Rooms { get; set; } = new List<CRoomInfo>();
         public static ISQL SQL { get; set; } = new MySQL();
 
-        public static void Send<T>(UserToken token, PacketType packetType, T res)
+        public static void Send<T>(UserToken? token, PacketType packetType, T res)
             where T : new()
         {
             Packet packet = new Packet();
             packet.SetData(packetType, Data<T>.Serialize(res));
-            token.Send(packet);
+            token?.Send(packet);
         }
     }
 }

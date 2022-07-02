@@ -36,8 +36,8 @@ namespace GraduatedProject_Server
             res.completed = true;
             res.reason = "";
 
-            K.Send(K.Users.Find(x => x.userInfo.id == roomInfo.player1)?.token!, PacketType.RES_GAME_TIME_PACKET, res);
-            K.Send(K.Users.Find(x => x.userInfo.id == roomInfo.player2)?.token!, PacketType.RES_GAME_TIME_PACKET, res);
+            K.Send(K.Users.Find(x => x.userInfo.id == roomInfo.player1)?.token, PacketType.RES_GAME_TIME_PACKET, res);
+            K.Send(K.Users.Find(x => x.userInfo.id == roomInfo.player2)?.token, PacketType.RES_GAME_TIME_PACKET, res);
         }
 
         ~CRoomInfo()
