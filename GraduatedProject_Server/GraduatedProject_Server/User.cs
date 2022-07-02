@@ -49,18 +49,20 @@ namespace GraduatedProject_Server
                 case PacketType.REQ_START_GAME_PACKET:
                     REQ_StartGame(packet);
                     break;
-                case PacketType.REQ_SET_WIN_PACKET:
+                case PacketType.REQ_GAME_WIN_PACKET:
+                    REQ_GameWin(packet);
                     break;
-                case PacketType.REQ_SET_LOSE_PACKET:
+                case PacketType.REQ_GAME_LOSE_PACKET:
+                    REQ_GameLose(packet);
                     break;
                 case PacketType.REQ_CHAT_PACKET:
                     REQ_Chat(packet);
                     break;
+                case PacketType.REQ_SELECTCHARACTOR:
+                    REQ_Select(packet);
+                    break;
                 case PacketType.REQ_CHARACTOR_PACKET:
                     REQ_Charactor(packet);
-                    break;
-                case PacketType.REQ_STAT_PACKET:
-                    REQ_Stat(packet);
                     break;
                 case PacketType.REQ_LOGOUT_PACKET:
                     REQ_Logout(packet);
@@ -71,6 +73,52 @@ namespace GraduatedProject_Server
                 case PacketType.END:
                     break;
             }
+        }
+
+        private void REQ_GameLose(Packet packet)
+        {
+            Console.Write("REQ_GameLose : ");
+
+            userInfo.lose++;
+
+            RefreshUserInfo();
+        }
+
+        private void REQ_GameWin(Packet packet)
+        {
+            Console.Write("REQ_GameWin : ");
+
+            userInfo.win++;
+
+            RefreshUserInfo();
+        }
+
+        private void RefreshUserInfo()
+        {
+            RES res = new RES();
+            res.completed = false;
+            res.reason = "Update 실패";
+            if (K.SQL.Query(new Query().Update("userinfo", $"win = {userInfo.win}, lose = {userInfo.lose}", $"id = '{userInfo.id}'")))
+            {
+                res.completed = true;
+                res.reason = "Update 성공";
+            }
+
+            RES_User res1 = new RES_User();
+            res1.completed = true;
+            res1.reason = "정보 갱신";
+            res1.userInfo = userInfo;
+
+            K.Send(token!, PacketType.RES_USER_PACKET, res1);
+            K.Send(token!, PacketType.RES_GAME_END_PACKET, res);
+
+            Console.WriteLine($"{res.reason}");
+        }
+
+        private void REQ_Select(Packet packet)
+        {
+            packet.type = ((short)PacketType.RES_SELECTCHARACTOR);
+            TossPacketToOther(packet);
         }
 
         private void REQ_User(Packet packet)
@@ -89,12 +137,6 @@ namespace GraduatedProject_Server
 
             K.Send(token!, PacketType.RES_USER_PACKET, res);
             Console.WriteLine($"{res.reason}");
-        }
-
-        private void REQ_Stat(Packet packet)
-        {
-            packet.type = ((short)PacketType.RES_STAT_PACKET);
-            TossPacketToOther(packet);
         }
 
         private void REQ_Logout(Packet packet)
@@ -141,6 +183,8 @@ namespace GraduatedProject_Server
                 K.Send(token!, PacketType.RES_START_GAME_PACKET, res);
                 res.playerNum = res.playerNum == 1 ? 0 : 1;
                 K.Send(GetOther()?.token!, PacketType.RES_START_GAME_PACKET, res);
+
+                K.Rooms.Find(x => x.roomInfo.name == roomInfo.roomInfo.name)?.StartTimer();
             }
             else
             {
@@ -332,6 +376,12 @@ namespace GraduatedProject_Server
 
             var req = packet.GetPacket<REQ_CreateEnterRoom>();
 
+            if (req.roomName == string.Empty)
+            {
+                Console.WriteLine($"name was empty");
+                return;
+            }
+
             RES_CreateRoom res = new RES_CreateRoom();
 
             var where = K.Rooms!.Where(x => x.roomInfo.name == req.roomName);
@@ -415,9 +465,20 @@ namespace GraduatedProject_Server
 
         private void REQ_Signin(Packet packet)
         {
-            Console.Write("REQ_Signin");
+            Console.Write("REQ_Signin : ");
 
             var req = packet.GetPacket<REQ_Signin>();
+
+            if (req.id == string.Empty)
+            {
+                Console.WriteLine($"id was empty");
+                return;
+            }
+            else if (req.pw == string.Empty)
+            {
+                Console.WriteLine($"pw was empty");
+                return;
+            }
 
             RES res = new RES();
 
