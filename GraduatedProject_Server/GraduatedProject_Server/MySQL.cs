@@ -71,7 +71,7 @@ namespace GraduatedProject_Server
     public class MySQL : ISQL
     {
         //readonly string server = "Server=119.196.245.41;";
-        readonly string server = "Server=3.36.125.83;";
+        readonly string server = "Server=127.0.0.1;";
         readonly string port = "Port=3306;";
         readonly string db = "Database=db;";
         readonly string id = "Uid=root;";
