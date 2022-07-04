@@ -15,6 +15,8 @@ namespace GraduatedProject_Server
 
         public UserToken? token;
 
+        REQ_RES_Charactor? lastCharactorPacket;
+
         public void ProcessPacket(Packet packet)
         {
             switch ((PacketType)packet.type)
@@ -97,16 +99,16 @@ namespace GraduatedProject_Server
         {
             RES res = new RES();
             res.completed = false;
-            res.reason = "Update 실패";
+            res.reason = "Update failed";
             if (K.SQL.Query(new Query().Update("userinfo", $"win = {userInfo.win}, lose = {userInfo.lose}", $"id = '{userInfo.id}'")))
             {
                 res.completed = true;
-                res.reason = "Update 성공";
+                res.reason = "Update completed";
             }
 
             RES_User res1 = new RES_User();
             res1.completed = true;
-            res1.reason = "정보 갱신";
+            res1.reason = "info refresh";
             res1.userInfo = userInfo;
 
             K.Send(token!, PacketType.RES_USER_PACKET, res1);
@@ -128,7 +130,7 @@ namespace GraduatedProject_Server
 
             RES_User res = new RES_User();
             res.completed = true;
-            res.reason = "유저 정보 불러오기 성공";
+            res.reason = "userinfo load success";
 
             if (user != null)
                 res.userInfo = user.userInfo;
@@ -148,13 +150,13 @@ namespace GraduatedProject_Server
             if (UpdateUserIsLogin(false))
             {
                 res.completed = true;
-                res.reason = "로그아웃 성공";
+                res.reason = "logout success";
                 userInfo = new();
             }
             else
             {
                 res.completed = false;
-                res.reason = "로그아웃 실패";
+                res.reason = "logout failed";
             }
 
             K.Send(token!, PacketType.RES_LOGOUT_PACKET, res);
@@ -164,6 +166,24 @@ namespace GraduatedProject_Server
 
         private void REQ_Charactor(Packet packet)
         {
+            var req = packet.GetPacket<REQ_RES_Charactor>();
+
+            if (lastCharactorPacket == null)
+            {
+                RefreshPacketDataAndSend(packet, req);
+            }
+            else if (req.charactorState != lastCharactorPacket.charactorState ||
+                req.posX != lastCharactorPacket.posX ||
+                req.hp != lastCharactorPacket.hp ||
+                req.dir != lastCharactorPacket.dir)
+            {
+                RefreshPacketDataAndSend(packet, req);
+            }
+        }
+
+        private void RefreshPacketDataAndSend(Packet packet, REQ_RES_Charactor req)
+        {
+            lastCharactorPacket = req;
             packet.type = ((short)PacketType.RES_CHARACTOR_PACKET);
             TossPacketToOther(packet);
         }
@@ -177,7 +197,7 @@ namespace GraduatedProject_Server
             if (CheckReady())
             {
                 res.completed = true;
-                res.reason = "게임 시작";
+                res.reason = "game start";
 
                 res.playerNum = roomInfo!.roomInfo.player1 == userInfo.id ? 0 : 1;
                 K.Send(token!, PacketType.RES_START_GAME_PACKET, res);
@@ -189,7 +209,7 @@ namespace GraduatedProject_Server
             else
             {
                 res.completed = false;
-                res.reason = "게임 시작 실패";
+                res.reason = "game start failed";
             }
 
             Console.WriteLine($"{res.reason}");
@@ -225,7 +245,7 @@ namespace GraduatedProject_Server
                 }
             }
 
-            res.reason = $"{count}개 전송 성공";
+            res.reason = $"{count} of rooms send success";
 
             K.Send(token!, PacketType.RES_ROOMS_PACKET, res);
 
@@ -260,13 +280,13 @@ namespace GraduatedProject_Server
 
             RES_OtherUser res1 = new RES_OtherUser();
             res1.completed = true;
-            res1.reason = "퇴장한 플레이어의 대한 정보";
+            res1.reason = "leaved player info";
             res1.roomInfo = room?.roomInfo ?? new();
 
             if (room == null)
             {
                 res.completed = false;
-                res.reason = "나가려는 방이 없음";
+                res.reason = "non room";
             }
             else
             {
@@ -276,7 +296,7 @@ namespace GraduatedProject_Server
                     if (DeleteRoom())
                     {
                         res.completed = true;
-                        res.reason = $"{room.roomInfo.name}방이 삭제됨";
+                        res.reason = $"{room.roomInfo.name} room was deleted";
                         K.Rooms.Remove(room);
                     }
                 }
@@ -301,7 +321,7 @@ namespace GraduatedProject_Server
                     if (LeaveRoom(updateColumnName))
                     {
                         res.completed = true;
-                        res.reason = $"{room.roomInfo.name}방에서 떠남";
+                        res.reason = $"{room.roomInfo.name} was leave room";
 
                         packet.SetData(PacketType.RES_OTHER_USER_LEAVE_ROOM_PACKET, Data<RES_OtherUser>.Serialize(res1));
                         GetOther()?.token?.Send(packet);
@@ -322,7 +342,7 @@ namespace GraduatedProject_Server
 
             RES_EnterRoom res = new RES_EnterRoom();
             res.completed = false;
-            res.reason = "입장 실패";
+            res.reason = "join failed";
 
             var room = GetRoomInfo(req.roomName);
 
@@ -330,7 +350,7 @@ namespace GraduatedProject_Server
 
             RES_OtherUser res1 = new RES_OtherUser();
             res1.completed = true;
-            res1.reason = "접속한 플레이어의 대한 정보";
+            res1.reason = "joined player info";
             res1.roomInfo = room.roomInfo;
 
             roomInfo = room;
@@ -357,7 +377,7 @@ namespace GraduatedProject_Server
             if (UpdateRoomInfo(updateColumnName, req.roomName, false))
             {
                 res.completed = true;
-                res.reason = "입장 성공";
+                res.reason = "join success";
 
                 packet.SetData(PacketType.RES_OTHER_USER_ENTER_ROOM_PACKET, Data<RES_OtherUser>.Serialize(res1));
                 GetOther()?.token?.Send(packet);
@@ -387,17 +407,17 @@ namespace GraduatedProject_Server
             var where = K.Rooms!.Where(x => x.roomInfo.name == req.roomName);
 
             res.completed = false;
-            res.reason = "존재하는 Room이름임";
+            res.reason = "was overlap room name";
             res.roomName = req.roomName;
 
             if (!where.Any())
             {
-                res.reason = "INSERT 실패";
+                res.reason = "INSERT failed";
 
                 if (K.SQL!.Query(new Query().Insert("roominfo", "name", $"'{req.roomName}'")))
                 {
                     res.completed = true;
-                    res.reason = "방 생성 성공";
+                    res.reason = "room create success";
                     var room = new CRoomInfo();
                     room.roomInfo = new RoomInfo { name = res.roomName, player1 = string.Empty, player2 = string.Empty };
                     K.Rooms.Add(room);
@@ -435,18 +455,18 @@ namespace GraduatedProject_Server
                     if (isLogined)
                     {
                         res.completed = false;
-                        res.reason = "중복 로그인";
+                        res.reason = "overlap login";
                     }
                     else
                     {
                         res.completed = false;
-                        res.reason = "로그인 실패";
+                        res.reason = "login failed";
                         userInfo.id = req.id;
 
                         if (UpdateUserIsLogin(true))
                         {
                             res.completed = true;
-                            res.reason = "로그인 성공";
+                            res.reason = "login success";
                         }
                     }
                 }
@@ -454,7 +474,7 @@ namespace GraduatedProject_Server
             else
             {
                 res.completed = false;
-                res.reason = "로그인 정보에 해당하는 유저 정보가 없음";
+                res.reason = "not found user for login info";
             }
             K.SQL.SelectEnd(ref reader!);
 
@@ -485,7 +505,7 @@ namespace GraduatedProject_Server
             if (req.pw != req.pwAgain)
             {
                 res.completed = false;
-                res.reason = "비밀번호와 확인비밀번호가 일치하지 않음";
+                res.reason = "not same pw, pw again";
 
                 K.Send(token!, PacketType.RES_SIGNIN_PACKET, res);
                 return;
@@ -495,7 +515,7 @@ namespace GraduatedProject_Server
             if (K.SQL!.Select(new Query().Select("*", "useraccount", $"id = '{req.id}'"), out reader!))
             {
                 res.completed = false;
-                res.reason = "이미 있는 계정임";
+                res.reason = "overlap account";
 
                 K.Send(token!, PacketType.RES_SIGNIN_PACKET, res);
                 K.SQL!.SelectEnd(ref reader!);
@@ -505,12 +525,12 @@ namespace GraduatedProject_Server
             K.SQL!.SelectEnd(ref reader!);
 
             res.completed = false;
-            res.reason = "INSERT 실패";
+            res.reason = "INSERT failed";
 
             if (K.SQL!.Query(new Query().Insert("useraccount", $"'{req.id}', sha2('{req.pw}',256)")))
             {
                 res.completed = true;
-                res.reason = "회원가입 성공";
+                res.reason = "sign success";
 
                 K.SQL!.Query(new Query().Insert("userinfo", $"'{req.id}',0,0,0,0"));
             }
