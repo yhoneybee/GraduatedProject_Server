@@ -105,14 +105,13 @@ namespace GraduatedProject_Server
                 res.completed = true;
                 res.reason = "Update completed";
             }
+            K.Send(token!, PacketType.RES_GAME_END_PACKET, res);
 
             RES_User res1 = new RES_User();
             res1.completed = true;
             res1.reason = "info refresh";
             res1.userInfo = userInfo;
-
             K.Send(token!, PacketType.RES_USER_PACKET, res1);
-            K.Send(token!, PacketType.RES_GAME_END_PACKET, res);
 
             Console.WriteLine($"{res.reason}");
         }
@@ -168,17 +167,19 @@ namespace GraduatedProject_Server
         {
             var req = packet.GetPacket<REQ_RES_Charactor>();
 
-            if (lastCharactorPacket == null)
-            {
-                RefreshPacketDataAndSend(packet, req);
-            }
-            else if (req.charactorState != lastCharactorPacket.charactorState ||
-                req.posX != lastCharactorPacket.posX ||
-                req.hp != lastCharactorPacket.hp ||
-                req.dir != lastCharactorPacket.dir)
-            {
-                RefreshPacketDataAndSend(packet, req);
-            }
+            RefreshPacketDataAndSend(packet, req);
+
+            //if (lastCharactorPacket == null)
+            //{
+            //    RefreshPacketDataAndSend(packet, req);
+            //}
+            //else if (req.charactorState != lastCharactorPacket.charactorState ||
+            //    req.posX != lastCharactorPacket.posX ||
+            //    req.hp != lastCharactorPacket.hp ||
+            //    req.dir != lastCharactorPacket.dir)
+            //{
+            //    RefreshPacketDataAndSend(packet, req);
+            //}
         }
 
         private void RefreshPacketDataAndSend(Packet packet, REQ_RES_Charactor req)
@@ -257,13 +258,16 @@ namespace GraduatedProject_Server
             Console.Write("REQ_ReadyGame : ");
 
             RES res = new RES();
-            res.completed = false;
+            res.completed = true;
 
             ReverseReady();
             UpdateReady();
             res.reason = $"{roomInfo!.roomInfo.player1Ready},{roomInfo!.roomInfo.player2Ready}";
 
             K.Send(token!, PacketType.RES_READY_GAME_PACKET, res);
+
+            packet.SetData(PacketType.RES_READY_GAME_PACKET, Data<RES>.Serialize(res));
+            GetOther()?.token?.Send(packet);
 
             Console.WriteLine($"{userInfo.id}/{res.reason}");
         }
@@ -285,7 +289,7 @@ namespace GraduatedProject_Server
 
             if (room == null)
             {
-                res.completed = false;
+                res.completed = true;
                 res.reason = "non room";
             }
             else
